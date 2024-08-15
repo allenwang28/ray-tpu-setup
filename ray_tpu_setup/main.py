@@ -209,14 +209,6 @@ def stream_startup_logs(tpu_name, zone, project, use_google_proxy, timeout=600):
     return False
 
 
-def enable_docker_ssh(tpu_name, worker, zone, project, use_google_proxy):
-    command = "sudo usermod -aG docker $USER && sudo systemctl restart docker -f"
-    output, error, returncode = ssh_to_tpu(
-        tpu_name, worker, zone, project, command, use_google_proxy
-    )
-    return True
-
-
 def start_ray_on_worker(
     tpu_name,
     worker_index,
@@ -230,7 +222,7 @@ def start_ray_on_worker(
     logger.info(f"Starting Ray on worker {worker_index}")
 
     if dockerfile:
-        ray_command = "docker exec ray_container "
+        ray_command = "sudo docker exec ray_container "
     else:
         ray_command = ""
 
@@ -293,20 +285,6 @@ def wait_for_tpu_and_setup_ray(
         logger.error("Startup script failed or timed out")
         return False
 
-    # Enable docker access on the VMs
-    with ThreadPoolExecutor(max_workers=len(worker_ips)) as executor:
-        future_to_worker = {
-            executor.submit(
-                enable_docker_ssh, tpu_name, i, zone, project, use_google_proxy
-            ): i
-            for i in range(len(worker_ips))
-        }
-        for future in concurrent.futures.as_completed(future_to_worker):
-            worker = future_to_worker[future]
-            if not future.result():
-                logger.error(f"Could not enable docker permissions on worker {worker}")
-                return False
-
     logger.info("Starting Ray on the head node (worker 0)")
     head_node_success = start_ray_on_worker(
         tpu_name,
@@ -353,13 +331,21 @@ def wait_for_tpu_and_setup_ray(
     logger.info("Ray cluster setup completed successfully")
     ray_command = ""
     if dockerfile:
-        ray_command = "docker exec ray_container "
+        ray_command = "sudo docker exec ray_container "
     ray_command += "ray status"
     proxy_command = (
         " -- -o ProxyCommand='corp-ssh-helper %h %p'" if use_google_proxy else ""
     )
-    full_command = f"gcloud compute tpus tpu-vm ssh {tpu_name} --worker={worker} --zone={zone} --project={project} --command='{ray_command}'{proxy_command}"
+    full_command = f"gcloud compute tpus tpu-vm ssh {tpu_name} --worker=0 --zone={zone} --project={project} --command='{ray_command}'{proxy_command}"
     logger.info(f"Confirm this yourself with: \n {full_command}")
+
+    if dockerfile:
+        full_command = f"gcloud compute tpus tpu-vm ssh {tpu_name} --worker=0 --zone={zone} --project={project} --command='sudo docker exec -it ray_container /bin/bash'{proxy_command}"
+        logger.info(f"SSH to the machine with:\n{full_command}")
+    else:
+        full_command = f"gcloud compute tpus tpu-vm ssh {tpu_name} --worker=0 --zone={zone} --project={project}{proxy_command}"
+        logger.info(f"SSH to the machine with:\n{full_command}")
+    full_command = f"gcloud compute tpus tpu-vm ssh {tpu_name} --worker=0 --zone={zone} --project={project} --command='{ray_command}'{proxy_command}"
     return True
 
 
