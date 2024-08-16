@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """A simple script to create a TPU cluster and start a Ray cluster where worker 0 is the head node."""
 
+from typing import Tuple, List, Optional, Any
 import argparse
 import subprocess
 import shlex
@@ -20,7 +21,17 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def run_command_with_timeout(command, timeout=60):
+def run_command_with_timeout(command: str, timeout: int = 60) -> Tuple[str, str, int]:
+    """
+    Execute a shell command with a specified timeout.
+
+    Args:
+        command (str): The shell command to execute.
+        timeout (int): The maximum time in seconds to wait for the command to complete.
+
+    Returns:
+        Tuple[str, str, int]: A tuple containing the command's stdout, stderr, and return code.
+    """
     try:
         result = subprocess.run(
             shlex.split(command), capture_output=True, text=True, timeout=timeout
@@ -31,8 +42,29 @@ def run_command_with_timeout(command, timeout=60):
 
 
 def ssh_to_tpu(
-    tpu_name, worker, zone, project, command, use_google_proxy=False, timeout=60
-):
+    tpu_name: str,
+    worker: int,
+    zone: str,
+    project: str,
+    command: str,
+    use_google_proxy: bool = False,
+    timeout: int = 60,
+) -> Tuple[str, str, int]:
+    """
+    Execute a command on a TPU worker via SSH.
+
+    Args:
+        tpu_name (str): The name of the TPU.
+        worker (int): The worker number to SSH into.
+        zone (str): The GCP zone where the TPU is located.
+        project (str): The GCP project ID.
+        command (str): The command to execute on the TPU.
+        use_google_proxy (bool): Whether to use the Google corporate proxy for SSH.
+        timeout (int): The maximum time in seconds to wait for the SSH command to complete.
+
+    Returns:
+        Tuple[str, str, int]: A tuple containing the command's stdout, stderr, and return code.
+    """
     proxy_command = (
         " -- -o ProxyCommand='corp-ssh-helper %h %p'" if use_google_proxy else ""
     )
@@ -52,7 +84,16 @@ def ssh_to_tpu(
     return output, error, returncode
 
 
-def run_command(command):
+def run_command(command: str) -> Tuple[str, str, int]:
+    """
+    Execute a shell command and capture its output.
+
+    Args:
+        command (str): The shell command to execute.
+
+    Returns:
+        Tuple[str, str, int]: A tuple containing the command's stdout, stderr, and return code.
+    """
     logger.info(f"Running command: {command}")
     process = subprocess.Popen(
         command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True
@@ -61,7 +102,13 @@ def run_command(command):
     return output.decode("utf-8"), error.decode("utf-8"), process.returncode
 
 
-def check_gcloud_installed():
+def check_gcloud_installed() -> bool:
+    """
+    Check if the Google Cloud SDK (gcloud) is installed and accessible.
+
+    Returns:
+        bool: True if gcloud is installed and accessible, False otherwise.
+    """
     logger.info("Checking if gcloud is installed...")
     try:
         subprocess.run(
@@ -80,7 +127,16 @@ def check_gcloud_installed():
         return False
 
 
-def create_startup_script(dockerfile=None):
+def create_startup_script(dockerfile: Optional[str] = None) -> str:
+    """
+    Generate a startup script for the TPU, optionally including Docker setup.
+
+    Args:
+        dockerfile (Optional[str]): The content of the Dockerfile, if any.
+
+    Returns:
+        str: The path to the generated startup script.
+    """
     logger.info("Generating startup script content...")
     script_content = """
     #!/bin/bash
@@ -128,8 +184,29 @@ pip install "ray[default]"
 
 
 def create_tpu_pod(
-    tpu_name, project, zone, accelerator_type, version, use_qr=False, dockerfile=None
-):
+    tpu_name: str,
+    project: str,
+    zone: str,
+    accelerator_type: str,
+    version: str,
+    use_qr: bool = False,
+    dockerfile: Optional[str] = None,
+) -> bool:
+    """
+    Create a TPU pod with the specified configuration.
+
+    Args:
+        tpu_name (str): The name for the TPU pod.
+        project (str): The GCP project ID.
+        zone (str): The GCP zone for the TPU.
+        accelerator_type (str): The TPU accelerator type.
+        version (str): The TPU software version.
+        use_qr (bool): Whether to use Queued Resources for creation.
+        dockerfile (Optional[str]): The content of the Dockerfile, if any.
+
+    Returns:
+        bool: True if the TPU pod was created successfully, False otherwise.
+    """
     logger.info(f"Creating TPU pod '{tpu_name}'...")
     if use_qr:
         command = f"""
@@ -163,7 +240,22 @@ def create_tpu_pod(
     return True
 
 
-def stream_startup_logs(tpu_name, zone, project, use_google_proxy, timeout=600):
+def stream_startup_logs(
+    tpu_name: str, zone: str, project: str, use_google_proxy: bool, timeout: int = 600
+) -> bool:
+    """
+    Stream and log the startup script execution from the TPU's worker 0.
+
+    Args:
+        tpu_name (str): The name of the TPU.
+        zone (str): The GCP zone where the TPU is located.
+        project (str): The GCP project ID.
+        use_google_proxy (bool): Whether to use the Google corporate proxy for SSH.
+        timeout (int): The maximum time in seconds to wait for the startup script to complete.
+
+    Returns:
+        bool: True if the startup script completed successfully, False otherwise.
+    """
     logger.info("Streaming startup script logs from worker 0...")
     start_time = time.time()
     last_log_time = time.time()
@@ -210,26 +302,42 @@ def stream_startup_logs(tpu_name, zone, project, use_google_proxy, timeout=600):
 
 
 def start_ray_on_worker(
-    tpu_name,
-    worker_index,
-    head_ip,
-    zone,
-    project,
-    dockerfile,
-    use_google_proxy,
-    is_head_node,
-):
+    tpu_name: str,
+    worker_index: int,
+    head_ip: str,
+    zone: str,
+    project: str,
+    dockerfile: Optional[str],
+    use_google_proxy: bool,
+    is_head_node: bool,
+) -> bool:
+    """
+    Start a Ray process on a specific TPU worker.
+
+    Args:
+        tpu_name (str): The name of the TPU.
+        worker_index (int): The index of the worker to start Ray on.
+        head_ip (str): The IP address of the Ray head node.
+        zone (str): The GCP zone where the TPU is located.
+        project (str): The GCP project ID.
+        dockerfile (Optional[str]): The content of the Dockerfile, if any.
+        use_google_proxy (bool): Whether to use the Google corporate proxy for SSH.
+        is_head_node (bool): Whether this worker is the head node of the Ray cluster.
+
+    Returns:
+        bool: True if Ray was started successfully on the worker, False otherwise.
+    """
     logger.info(f"Starting Ray on worker {worker_index}")
 
     if dockerfile:
-        ray_command = "sudo docker exec ray_container "
+        ray_command = "sudo docker exec ray_container ray "
     else:
-        ray_command = ""
+        ray_command = "/home/$(whoami)/.local/bin/ray "
 
     if is_head_node:
-        ray_command += "ray start --head --port=6379"
+        ray_command += "start --head --port=6379"
     else:
-        ray_command += f"ray start --address={head_ip}:6379"
+        ray_command += f"start --address={head_ip}:6379"
 
     output, error, returncode = ssh_to_tpu(
         tpu_name, worker_index, zone, project, ray_command, use_google_proxy
@@ -241,9 +349,54 @@ def start_ray_on_worker(
     return True
 
 
+def install_ray_on_worker(
+    tpu_name: str, worker_index: int, zone: str, project: str, use_google_proxy: bool
+) -> bool:
+    """
+    Install Ray on a specific TPU worker.
+
+    Args:
+        tpu_name (str): The name of the TPU.
+        worker_index (int): The index of the worker to install Ray on.
+        zone (str): The GCP zone where the TPU is located.
+        project (str): The GCP project ID.
+        use_google_proxy (bool): Whether to use the Google corporate proxy for SSH.
+
+    Returns:
+        bool: True if Ray was installed successfully on the worker, False otherwise.
+    """
+    logger.info(f"Installing ray on worker {worker_index}.")
+    cmd = "pip install 'ray[default]'"
+    output, error, returncode = ssh_to_tpu(
+        tpu_name, worker_index, zone, project, cmd, use_google_proxy
+    )
+    if returncode != 0:
+        logger.error(f"Error installing Ray on worker {worker_index}: {error}")
+        return False
+    logger.info(f"Ray installed successfully on worker {worker_index}")
+    return True
+
+
 def wait_for_tpu_and_setup_ray(
-    tpu_name, project, zone, dockerfile, use_google_proxy: bool = False
-):
+    tpu_name: str,
+    project: str,
+    zone: str,
+    dockerfile: Optional[str],
+    use_google_proxy: bool = False,
+) -> bool:
+    """
+    Wait for the TPU to be ready and set up a Ray cluster on it.
+
+    Args:
+        tpu_name (str): The name of the TPU.
+        project (str): The GCP project ID.
+        zone (str): The GCP zone where the TPU is located.
+        dockerfile (Optional[str]): The content of the Dockerfile, if any.
+        use_google_proxy (bool): Whether to use the Google corporate proxy for SSH.
+
+    Returns:
+        bool: True if the Ray cluster was set up successfully, False otherwise.
+    """
     logger.info("Waiting for TPU to be ready...")
     while True:
         command = f"gcloud compute tpus tpu-vm describe {tpu_name} --zone={zone} --project={project}"
@@ -281,9 +434,30 @@ def wait_for_tpu_and_setup_ray(
     logger.info(f"Worker IPs: {worker_ips}")
 
     # Stream startup logs from worker 0
-    if not stream_startup_logs(tpu_name, zone, project, use_google_proxy):
-        logger.error("Startup script failed or timed out")
-        return False
+    if dockerfile:
+        if not stream_startup_logs(tpu_name, zone, project, use_google_proxy):
+            logger.error("Startup script failed or timed out")
+            return False
+    else:
+        # need to set up Ray
+        logger.info("Setting up Ray on all workers.")
+        with ThreadPoolExecutor(max_workers=len(worker_ips)) as executor:
+            future_to_worker = {
+                executor.submit(
+                    install_ray_on_worker,
+                    tpu_name,
+                    i,
+                    zone,
+                    project,
+                    use_google_proxy,
+                ): i
+                for i in range(0, len(worker_ips))
+            }
+            for future in concurrent.futures.as_completed(future_to_worker):
+                worker = future_to_worker[future]
+                if not future.result():
+                    logger.error(f"Failed to install Ray on worker {worker}")
+                    return False
 
     logger.info("Starting Ray on the head node (worker 0)")
     head_node_success = start_ray_on_worker(
@@ -329,10 +503,11 @@ def wait_for_tpu_and_setup_ray(
                     return False
 
     logger.info("Ray cluster setup completed successfully")
-    ray_command = ""
     if dockerfile:
-        ray_command = "sudo docker exec ray_container "
-    ray_command += "ray status"
+        ray_command = "sudo docker exec ray_container ray "
+    else:
+        ray_command = "/home/$(whoami)/.local/bin/ray "
+    ray_command += "status"
     proxy_command = (
         " -- -o ProxyCommand='corp-ssh-helper %h %p'" if use_google_proxy else ""
     )
