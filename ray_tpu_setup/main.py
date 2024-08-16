@@ -127,12 +127,13 @@ def check_gcloud_installed() -> bool:
         return False
 
 
-def create_startup_script(dockerfile: Optional[str] = None) -> str:
+def create_startup_script(dockerfile: Optional[str] = None, disk_name: Optional[str] = None) -> str:
     """
-    Generate a startup script for the TPU, optionally including Docker setup.
+    Generate a startup script for the TPU, optionally including Docker setup and disk mounting.
 
     Args:
         dockerfile (Optional[str]): The content of the Dockerfile, if any.
+        disk_name (Optional[str]): The name of the disk to mount, if any.
 
     Returns:
         str: The path to the generated startup script.
@@ -157,8 +158,21 @@ def create_startup_script(dockerfile: Optional[str] = None) -> str:
     echo "Finished configuring docker!"
     """
 
+    if disk_name:
+        script_content += f"""
+# Mount the attached disk
+echo "Mounting disk."
+sudo mkdir -p /mnt/disks/persist
+sudo mount -o discard,defaults /dev/sdb /mnt/disks/persist
+sudo chmod a+r /mnt/disks/persist
+"""
+
     if dockerfile:
         logger.info("Adding Dockerfile content to startup script...")
+        if disk_name:
+            docker_command = "docker run -d -v /mnt/disks/persist:/mnt/disks/persist --privileged --name ray_container --network host ray_image"
+        else:
+            docker_command = "docker run -d --privileged --name ray_container --network host ray_image"
         script_content += """
 echo "Creating Dockerfile."
 cat << 'EEOF' > /tmp/Dockerfile
@@ -169,8 +183,8 @@ echo "Building Docker image"
 docker build -t ray_image -f /tmp/Dockerfile .
 
 echo "Starting the Docker container"
-docker run -d --privileged --name ray_container --network host ray_image
 """.format(dockerfile.strip())
+        script_content += docker_command
     else:
         script_content += """
 pip install "ray[default]"
@@ -183,6 +197,34 @@ pip install "ray[default]"
     return script_path
 
 
+def create_disk_from_image(disk_name: str, image_name: str, project: str, zone: str) -> bool:
+    """
+    Create a disk from an existing image.
+
+    Args:
+        disk_name (str): The name for the new disk.
+        image_name (str): The name of the source image.
+        project (str): The GCP project ID.
+        zone (str): The GCP zone for the disk.
+
+    Returns:
+        bool: True if the disk was created successfully, False otherwise.
+    """
+    logger.info(f"Creating disk '{disk_name}' from image '{image_name}'...")
+    command = f"""
+    gcloud compute disks create {disk_name} \
+    --project={project} \
+    --zone={zone} \
+    --image={image_name}
+    """
+    output, error, returncode = run_command(command)
+    if returncode != 0:
+        logger.error(f"Error creating disk: {error}")
+        return False
+    logger.info(f"Disk '{disk_name}' created successfully")
+    return True
+
+
 def create_tpu_pod(
     tpu_name: str,
     project: str,
@@ -191,6 +233,7 @@ def create_tpu_pod(
     version: str,
     use_qr: bool = False,
     dockerfile: Optional[str] = None,
+    disk_name: Optional[str] = None,
 ) -> bool:
     """
     Create a TPU pod with the specified configuration.
@@ -203,6 +246,7 @@ def create_tpu_pod(
         version (str): The TPU software version.
         use_qr (bool): Whether to use Queued Resources for creation.
         dockerfile (Optional[str]): The content of the Dockerfile, if any.
+        disk_name (Optional[str]): The name of the disk to attach, if any.
 
     Returns:
         bool: True if the TPU pod was created successfully, False otherwise.
@@ -217,7 +261,7 @@ def create_tpu_pod(
         --accelerator-type {accelerator_type} \
         --runtime-version {version}"""
         if dockerfile:
-            startup_script = create_startup_script(dockerfile)
+            startup_script = create_startup_script(dockerfile, disk_name)
             command += f" --metadata startup-script={startup_script}"
     else:
         command = f"""
@@ -227,8 +271,10 @@ def create_tpu_pod(
         --zone {zone} \
         --version {version}"""
         if dockerfile:
-            startup_script = create_startup_script(dockerfile)
+            startup_script = create_startup_script(dockerfile, disk_name)
             command += f" --metadata-from-file='startup-script={startup_script}'"
+        if disk_name:
+            command += f" --data-disk source=projects/{project}/zones/{zone}/disks/{disk_name},mode=read-only"
 
     logger.info("Creating startup script...")
 
@@ -434,10 +480,9 @@ def wait_for_tpu_and_setup_ray(
     logger.info(f"Worker IPs: {worker_ips}")
 
     # Stream startup logs from worker 0
-    if dockerfile:
-        if not stream_startup_logs(tpu_name, zone, project, use_google_proxy):
-            logger.error("Startup script failed or timed out")
-            return False
+    if not stream_startup_logs(tpu_name, zone, project, use_google_proxy):
+        logger.error("Startup script failed or timed out")
+        return False
     else:
         # need to set up Ray
         logger.info("Setting up Ray on all workers.")
@@ -515,8 +560,9 @@ def wait_for_tpu_and_setup_ray(
     logger.info(f"Confirm this yourself with: \n {full_command}")
 
     if dockerfile:
-        full_command = f"gcloud compute tpus tpu-vm ssh {tpu_name} --worker=0 --zone={zone} --project={project} --command='sudo docker exec -it ray_container /bin/bash'{proxy_command}"
+        full_command = f"gcloud compute tpus tpu-vm ssh {tpu_name} --worker=0 --zone={zone} --project={project}{proxy_command}"
         logger.info(f"SSH to the machine with:\n{full_command}")
+        logger.info("then: 'sudo docker exec -it ray_container /bin/bash'")
     else:
         full_command = f"gcloud compute tpus tpu-vm ssh {tpu_name} --worker=0 --zone={zone} --project={project}{proxy_command}"
         logger.info(f"SSH to the machine with:\n{full_command}")
@@ -549,6 +595,8 @@ def main():
         action="store_true",
         help="Use Google corporate proxy for SSH connections",
     )
+    parser.add_argument("--image-name", help="Optional name of the image to create a disk from")
+    parser.add_argument("--disk-name", help="Optional name for the disk to be created and attached to the TPU, OR the name of an existing disk.")
 
     args = parser.parse_args()
 
@@ -556,6 +604,14 @@ def main():
     if args.dockerfile:
         with open(args.dockerfile, "r") as f:
             dockerfile_content = f.read()
+
+    if args.image_name:
+        if not args.disk_name:
+            args.disk_name = args.name
+            logger.info(f"Disk name not provided for image creation, using {args.disk_name}.")
+        if not create_disk_from_image(args.disk_name, args.image_name, args.project, args.zone):
+            logger.error(f"Failed to create disk '{args.disk_name}' from image '{args.image_name}'")
+            sys.exit(1)
 
     success = create_tpu_pod(
         args.name,
@@ -565,16 +621,17 @@ def main():
         args.version,
         args.use_qr,
         dockerfile_content,
+        args.disk_name,
     )
 
     if success:
         logger.info(f"TPU pod '{args.name}' created successfully.")
-        success = wait_for_tpu_and_setup_ray(
-            args.name,
-            args.project,
-            args.zone,
-            dockerfile_content,
-            args.use_google_proxy,
+        wait_for_tpu_and_setup_ray(
+            tpu_name=args.name,
+            project=args.project,
+            zone=args.zone,
+            dockerfile=dockerfile_content,
+            use_google_proxy=args.use_google_proxy,
         )
         if success:
             logger.info(f"Ray cluster on TPU pod '{args.name}' is set up and ready.")
