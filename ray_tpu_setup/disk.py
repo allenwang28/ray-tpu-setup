@@ -220,7 +220,7 @@ class GCSVMManager:
         Raises:
             Exception: If the download fails.
         """
-        command = f"gsutil -m cp -R {gcs_path} /mnt/disks/persist"
+        command = f"gsutil -m cp -R {gcs_path} /mnt/disks/persist/"
         ssh_command = (
             f"gcloud compute ssh {vm_name} --zone={self.zone} --project={self.project}"
         )

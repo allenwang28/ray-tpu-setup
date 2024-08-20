@@ -127,7 +127,9 @@ def check_gcloud_installed() -> bool:
         return False
 
 
-def create_startup_script(dockerfile: Optional[str] = None, disk_name: Optional[str] = None) -> str:
+def create_startup_script(
+    dockerfile: Optional[str] = None, disk_name: Optional[str] = None
+) -> str:
     """
     Generate a startup script for the TPU, optionally including Docker setup and disk mounting.
 
@@ -197,7 +199,9 @@ pip install "ray[default]"
     return script_path
 
 
-def create_disk_from_image(disk_name: str, image_name: str, project: str, zone: str) -> bool:
+def create_disk_from_image(
+    disk_name: str, image_name: str, project: str, zone: str
+) -> bool:
     """
     Create a disk from an existing image.
 
@@ -595,8 +599,13 @@ def main():
         action="store_true",
         help="Use Google corporate proxy for SSH connections",
     )
-    parser.add_argument("--image-name", help="Optional name of the image to create a disk from")
-    parser.add_argument("--disk-name", help="Optional name for the disk to be created and attached to the TPU, OR the name of an existing disk.")
+    parser.add_argument(
+        "--image-name", help="Optional name of the image to create a disk from"
+    )
+    parser.add_argument(
+        "--disk-name",
+        help="Optional name for the disk to be created and attached to the TPU, OR the name of an existing disk.",
+    )
 
     args = parser.parse_args()
 
@@ -608,9 +617,15 @@ def main():
     if args.image_name:
         if not args.disk_name:
             args.disk_name = args.name
-            logger.info(f"Disk name not provided for image creation, using {args.disk_name}.")
-        if not create_disk_from_image(args.disk_name, args.image_name, args.project, args.zone):
-            logger.error(f"Failed to create disk '{args.disk_name}' from image '{args.image_name}'")
+            logger.info(
+                f"Disk name not provided for image creation, using {args.disk_name}."
+            )
+        if not create_disk_from_image(
+            args.disk_name, args.image_name, args.project, args.zone
+        ):
+            logger.error(
+                f"Failed to create disk '{args.disk_name}' from image '{args.image_name}'"
+            )
             sys.exit(1)
 
     success = create_tpu_pod(
