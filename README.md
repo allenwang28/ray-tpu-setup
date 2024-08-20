@@ -41,7 +41,7 @@ Includes an option for Google employees to use the corporate proxy for SSH conne
 The end result is a fully configured Ray cluster running on TPU pods, ready for distributed computing tasks. The script aims to make this process as smooth and error-free as possible, with ample logging to help troubleshoot any issues that may arise.
 
 ## Features
-- Create TPU pods with on-demand or queued resources
+- Create TPU pods with on-demand resources 
 - Set up Ray clusters automatically on TPU pods
 - Support for custom Docker environments
 - Attach and mount persistent disks to TPU pods
@@ -52,7 +52,6 @@ The end result is a fully configured Ray cluster running on TPU pods, ready for 
 - Google Cloud SDK (gcloud) installed and configured
 - Access to Google Cloud TPU resources
 
-
 ## Installation
 You can either `git clone` this repo and `pip install` it, or install it directly via:
 
@@ -60,16 +59,33 @@ You can either `git clone` this repo and `pip install` it, or install it directl
 pip install git+https://github.com/allenwang28/ray-tpu-setup.git
 ```
 
-
 ## Usage
-The basic syntax for using `ray-tpu-setup` is:
+The `ray-tpu-setup` CLI supports two main commands:
+1. `create-image`: For creating a GCE image from a GCS bucket.
+2. `setup`: For creating and setting up a Ray cluster on TPU pods.
+
+
+### Working with Persistent Disks and GCS buckets
+The `ray-tpu-setup` script supports attaching existing persistent disks to your TPU pod. This is useful for storing and accessing large datasets / model checkpoints / preserving state between TPU pod recreations. Here is the workflow:
 
 ```
-ray-tpu-setup name [options]
+ray-tpu-setup create-image gs://your-bucket/path \
+    --project your-project-id \
+    --zone us-central1-a \
+    --image-name your-custom-image
+```
+
+This image can then be used in the ray cluster setup.
+
+
+### Setting up a Ray cluster on TPU
+To set up a Ray cluster on TPUs, the CLI looks like this:
+
+```
+ray-tpu-setup setup name [options]
 ```
 
 Options:
-- `--use-qr`: Use Queued Resource instead of on-demand TPU
 - `--dockerfile <path>`: Path to a Dockerfile for custom environments
 - `--project <project-id>`: Google Cloud project ID (required)
 - `--zone <zone>`: Google Cloud zone for the TPU (required)
@@ -80,10 +96,19 @@ Options:
 - `--disk-name <disk-name>`: Either the name of an existing persistent disk, or the name of a persistent disk to be created using `--image-name`.
 
 
-## Example
+## End-to-end Example
 
+Create an image for Llama 70b
 ```
-ray-tpu-setup my-tpu-cluster \
+ray-tpu-setup create-image gs://my-bucket/llama_ckpt/llama-2-70b \
+    --project=my-project-id \
+    --zone=us-central2-b \
+    --image-name=llama2-70b
+```
+
+Create the Ray TPU cluster
+```
+ray-tpu-setup setup my-tpu-cluster \
     --project my-project-id \
     --zone us-central2-b \
     --accelerator_type v4-8 \
@@ -92,23 +117,6 @@ ray-tpu-setup my-tpu-cluster \
     --disk-name my-data-disk \
     --image llama2-70b
 ```
-
-# Working with Persistent Disks and GCS buckets
-The `ray-tpu-setup` script supports attaching existing persistent disks to your TPU pod. This is useful for storing and accessing large datasets / model checkpoints / preserving state between TPU pod recreations. Here is the workflow:
-
-1. *Create an image from GCS bucket data*: Use the disk.py script to create a GCE image from your GCS bucket. This script automates the process of turning your GCS bucket data into a disk image. Example:
-```
-python disk.py gs://your-bucket/path \
-    --project your-project-id \
-    --zone us-central1-a \
-    --image-name your-custom-image
-```
-2. *Provide the image name to `ray-tpu-setup`*: When running `ray-tpu-setup`, use the `--image-name` option to specify the image you just created.
-3. *Let `ray-tpu-setup` handle the rest*: The `ray-tpu-setup`` script will automatically:
-- Create a persistent disk from the specified image
-- Attach the disk to your TPU pod
-- Mount the disk on all workers of the TPU pod at /mnt/disks/<disk-name>
-
 
 # Troubleshooting
 
@@ -124,4 +132,4 @@ Contributions to `ray-tpu-setup` are welcome! Please feel free to submit pull re
 
 
 # License
-This project is licensed under the MIT License - see the LICENSE file for detail
+This project is licensed under the MIT License - see the LICENSE file for detail.

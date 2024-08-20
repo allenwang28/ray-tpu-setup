@@ -337,124 +337,82 @@ class GCSVMManager:
             raise Exception(f"Failed to delete disk: {error}")
 
 
-def main(
-    gcs_path: str,
-    project: str,
-    zone: str,
-    vm_name: Optional[str],
-    disk_name: Optional[str],
-    disk_size_gb: Optional[int],
-    image_name: Optional[str],
-    machine_type: str,
-    use_google_proxy: bool,
-) -> None:
-    """
-    Main function to orchestrate the GCS to GCE image conversion process.
-
-    Args:
-        gcs_path (str): GCS path to download from.
-        project (str): Google Cloud project ID.
-        zone (str): Google Cloud zone.
-        vm_name (Optional[str]): Name for the VM (optional).
-        disk_name (Optional[str]): Name for the disk (optional).
-        disk_size_gb (Optional[int]): Size of the disk in GB (optional).
-        image_name (Optional[str]): Name for the image to create.
-        machine_type (str): VM machine type.
-        use_google_proxy (bool): Whether to use the Google proxy for SSH.
-    """
-    manager = GCSVMManager(project, zone)
+def create_image_from_gcs(args: argparse.ArgumentParser):
+    """Create an image from a given GCS bucket."""
+    manager = GCSVMManager(project=args.project, zone=args.zone)
 
     try:
         # Generate default names if not provided
-        if not vm_name:
-            vm_name = f"{os.getlogin()}-temp-vm-{int(time.time())}"
-        if not disk_name:
-            disk_name = f"{os.getlogin()}-temp-disk-{int(time.time())}"
+        if not args.vm_name:
+            args.vm_name = f"{os.getlogin()}-temp-vm-{int(time.time())}"
+        if not args.disk_name:
+            args.disk_name = f"{os.getlogin()}-temp-disk-{int(time.time())}"
 
-        # Check if the specified zone matches the bucket's region
-        bucket_region = manager.get_bucket_region(gcs_path)
-        if bucket_region.lower() not in zone.lower():
+        # Check if the specified args.zone matches the bucket's region
+        bucket_region = manager.get_bucket_region(gcs_path=args.gcs_path)
+        if bucket_region.lower() not in args.zone.lower():
             logger.warning(
-                f"The specified zone ({zone}) is not in the same region as the bucket ({bucket_region}). "
+                f"The specified args.zone ({args.zone}) is not in the same region as the bucket ({bucket_region}). "
                 f"This may incur additional costs and increase transfer time."
             )
 
-        if not disk_size_gb:
-            logger.info("Calculating required disk size...")
-            disk_size_gb = manager.get_bucket_size(gcs_path)
+        logger.info("Calculating required disk size...")
+        bucket_size = manager.get_bucket_size(gcs_path=args.gcs_path)
+
+        if args.disk_size_gb and int(args.disk_size_gb) < bucket_size:
+            raise ValueError(
+                f"Provided disk size ({args.disk_size_gb}) is less than the esitmated bucket size ({bucket_size})."
+            )
+        else:
             user_confirm = input(
-                f"Estimated required disk size: {disk_size_gb}GB. Proceed? (y/n): "
+                f"Estimated required disk size: {bucket_size}GB. Proceed? (y/n): "
             )
             if user_confirm.lower() != "y":
                 logger.info("Operation cancelled by user.")
                 return
+            args.disk_size_gb = bucket_size
 
         logger.info("Creating VM...")
-        manager.create_vm(name=vm_name, machine_type=machine_type)
+        manager.create_vm(name=args.vm_name, machine_type=args.machine_type)
 
         logger.info("Creating disk...")
-        manager.create_disk(name=disk_name, size_gb=disk_size_gb)
+        manager.create_disk(name=args.disk_name, size_gb=args.disk_size_gb)
 
         logger.info("Attaching disk to VM...")
-        manager.attach_disk(vm_name, disk_name)
+        manager.attach_disk(vm_name=args.vm_name, disk_name=args.disk_name)
 
         logger.info("Formatting and mounting disk...")
-        manager.format_and_mount_disk(vm_name, use_google_proxy)
+        manager.format_and_mount_disk(
+            vm_name=args.vm_name, use_google_proxy=args.use_google_proxy
+        )
 
         logger.info("Starting download from GCS...")
-        manager.download_from_gcs(vm_name, gcs_path, use_google_proxy)
+        manager.download_from_gcs(
+            vm_name=args.vm_name,
+            gcs_path=args.gcs_path,
+            use_google_proxy=args.use_google_proxy,
+        )
+        logger.info("Quick wait to avoid any race conditions...")
+        time.sleep(30)
 
         logger.info("Detaching disk...")
-        manager.detach_disk(vm_name, disk_name)
+        manager.detach_disk(vm_name=args.vm_name, disk_name=args.disk_name)
 
-        if image_name:
-            logger.info(f"Creating image '{image_name}' from disk...")
-            manager.create_image(disk_name, image_name)
+        if args.image_name:
+            logger.info(f"Creating image '{args.image_name}' from disk...")
+            manager.create_image(disk_name=args.disk_name, image_name=args.image_name)
 
-            logger.info(f"Verifying image '{image_name}' exists...")
-            if manager.verify_image_exists(image_name):
-                logger.info(f"Image '{image_name}' created successfully.")
+            logger.info(f"Verifying image '{args.image_name}' exists...")
+            if manager.verify_image_exists(image_name=args.image_name):
+                logger.info(f"Image '{args.image_name}' created successfully.")
             else:
-                logger.error(f"Failed to verify the existence of image '{image_name}'.")
+                logger.error(
+                    f"Failed to verify the existence of image '{args.image_name}'."
+                )
 
     except Exception as e:
         logger.error(f"An error occurred: {str(e)}")
     finally:
         logger.info("Cleaning up resources...")
-        manager.delete_vm(vm_name)
-        manager.delete_disk(disk_name)
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="GCS to VM Disk Manager")
-    parser.add_argument("gcs_path", help="GCS path to download from")
-    parser.add_argument("--project", required=True, help="Google Cloud project ID")
-    parser.add_argument("--zone", required=True, help="Google Cloud zone")
-    parser.add_argument("--vm-name", help="Name for the VM (optional)")
-    parser.add_argument("--disk-name", help="Name for the disk (optional)")
-    parser.add_argument(
-        "--disk-size-gb", type=int, help="Size of the disk in GB (optional)"
-    )
-    parser.add_argument("--image-name", help="Name for the image to create")
-    parser.add_argument(
-        "--machine-type", default="n2-standard-8", help="VM machine type"
-    )
-    parser.add_argument(
-        "--use-google-proxy",
-        action="store_true",
-        help="Use corp-ssh-helper for SSH connections",
-    )
-
-    args = parser.parse_args()
-
-    main(
-        args.gcs_path,
-        args.project,
-        args.zone,
-        args.vm_name,
-        args.disk_name,
-        args.disk_size_gb,
-        args.image_name,
-        args.machine_type,
-        args.use_google_proxy,
-    )
+        manager.delete_vm(vm_name=args.vm_name)
+        manager.delete_disk(disk_name=args.disk_name)
