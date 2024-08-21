@@ -3,8 +3,8 @@
 
 import argparse
 import logging
-from .tpu_setup import create_tpu_cluster
-from .disk_manager import create_image_from_gcs
+from .tpu_setup import setup_ray_tpu_cluster
+from .disk_manager import setup_disk
 import sys
 import subprocess
 
@@ -67,7 +67,9 @@ def main():
         help="Use Google corporate proxy for SSH connections",
     )
     tpu_parser.add_argument(
-        "--image-name", help="Optional name of the image to create a disk from"
+        "--image-name",
+        required=False,
+        help="Optional name of the image to create a disk from",
     )
     tpu_parser.add_argument(
         "--disk-name",
@@ -76,13 +78,13 @@ def main():
 
     # Disk creation command
     disk_parser = subparsers.add_parser(
-        "create-image", help="Create a GCE image from a GCS bucket"
+        "setup-disk", help="Create a GCE image from a GCS bucket"
     )
     disk_parser.add_argument("gcs_path", help="GCS path to download from")
     disk_parser.add_argument("--project", required=True, help="Google Cloud project ID")
     disk_parser.add_argument("--zone", required=True, help="Google Cloud zone")
     disk_parser.add_argument(
-        "--image-name", required=True, help="Name for the image to create"
+        "--image-name", required=False, help="Name for the image to create"
     )
     disk_parser.add_argument(
         "--machine-type", default="n2-standard-8", help="VM machine type"
@@ -93,21 +95,21 @@ def main():
         help="Use corp-ssh-helper for SSH connections",
     )
     disk_parser.add_argument(
-        "--vm_name", required=False, help="Name of the VM to be created."
+        "--vm-name", required=False, help="Name of the VM to be created."
     )
     disk_parser.add_argument(
-        "--disk_name", required=False, help="Name of the disk to be created."
+        "--disk-name", required=False, help="Name of the disk to be created."
     )
     disk_parser.add_argument(
-        "--disk_size_gb", required=False, help="The size of the disk to be created."
+        "--disk-size-gb", required=False, help="The size of the disk to be created."
     )
 
     args = parser.parse_args()
 
     if args.command == "setup":
-        create_tpu_cluster(args)
-    elif args.command == "create-image":
-        create_image_from_gcs(args)
+        setup_ray_tpu_cluster(args)
+    elif args.command == "setup-disk":
+        setup_disk(args)
     else:
         parser.print_help()
 

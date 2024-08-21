@@ -337,8 +337,8 @@ class GCSVMManager:
             raise Exception(f"Failed to delete disk: {error}")
 
 
-def create_image_from_gcs(args: argparse.ArgumentParser):
-    """Create an image from a given GCS bucket."""
+def setup_disk(args: argparse.ArgumentParser):
+    """Sets up a disk from a given GCS bucket."""
     manager = GCSVMManager(project=args.project, zone=args.zone)
 
     try:
@@ -396,7 +396,7 @@ def create_image_from_gcs(args: argparse.ArgumentParser):
         time.sleep(30)
 
         logger.info("Detaching disk...")
-        manager.detach_disk(vm_name=args.vm_name, disk_name=args.disk_name)
+        # manager.detach_disk(vm_name=args.vm_name, disk_name=args.disk_name)
 
         if args.image_name:
             logger.info(f"Creating image '{args.image_name}' from disk...")
@@ -414,5 +414,4 @@ def create_image_from_gcs(args: argparse.ArgumentParser):
         logger.error(f"An error occurred: {str(e)}")
     finally:
         logger.info("Cleaning up resources...")
-        manager.delete_vm(vm_name=args.vm_name)
-        manager.delete_disk(disk_name=args.disk_name)
+        # manager.delete_vm(vm_name=args.vm_name)

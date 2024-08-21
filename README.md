@@ -61,7 +61,7 @@ pip install git+https://github.com/allenwang28/ray-tpu-setup.git
 
 ## Usage
 The `ray-tpu-setup` CLI supports two main commands:
-1. `create-image`: For creating a GCE image from a GCS bucket.
+1. `setup-disk`: For setting up a disk and/or GCE image from a GCS bucket.
 2. `setup`: For creating and setting up a Ray cluster on TPU pods.
 
 
@@ -69,7 +69,7 @@ The `ray-tpu-setup` CLI supports two main commands:
 The `ray-tpu-setup` script supports attaching existing persistent disks to your TPU pod. This is useful for storing and accessing large datasets / model checkpoints / preserving state between TPU pod recreations. Here is the workflow:
 
 ```
-ray-tpu-setup create-image gs://your-bucket/path \
+ray-tpu-setup setup-disk gs://your-bucket/path \
     --project your-project-id \
     --zone us-central1-a \
     --image-name your-custom-image
@@ -100,7 +100,7 @@ Options:
 
 Create an image for Llama 70b
 ```
-ray-tpu-setup create-image gs://my-bucket/llama_ckpt/llama-2-70b \
+ray-tpu-setup setup-disk gs://my-bucket/llama_ckpt/llama-2-70b \
     --project=my-project-id \
     --zone=us-central2-b \
     --image-name=llama2-70b
